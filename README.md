@@ -9,12 +9,6 @@ This project utilizes the MedMNIST dataset and implements a self-supervised lear
 - BYOL-PyTorch
 - PyTorch-Lightning
 
-pip install medmnist
-pip install byol-pytorch
-pip install pytorch-lightning
-pip install pillow
-
-
 
 ## Attribution
 
