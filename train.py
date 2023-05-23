@@ -26,7 +26,7 @@ args = parser.parse_args()
 # constants
 
 BATCH_SIZE = 32
-EPOCHS     = 3 #was 1000
+EPOCHS     = 10 #was 1000
 LR         = 3e-4
 #NUM_GPUS   = 2
 IMAGE_SIZE = 28 #was 256
@@ -47,16 +47,6 @@ class SelfSupervisedLearner(pl.LightningModule):
         loss = self.forward(images)
         return {'loss': loss}
 
-    '''#me
-    def validation_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self.forward(images)
-        loss = self.calculate_loss(outputs, labels)
-        metrics = self.calculate_metrics(outputs, labels)
-        self.log('val_loss', loss, prog_bar=True)
-        self.log_dict(metrics, prog_bar=True)    
-        #return {'val_loss': loss, 'val_acc': accuracy}  
-    '''
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=LR)
 
@@ -64,21 +54,7 @@ class SelfSupervisedLearner(pl.LightningModule):
         if self.learner.use_momentum:
             self.learner.update_moving_average()
 
-    '''#me
-    def calculate_loss(self, outputs, labels):
-        # Implement your loss calculation logic here
-        loss = torch.nn.functional.cross_entropy(outputs, labels)
-        return loss
     
-    #me
-    def calculate_metrics(self, outputs, labels):
-        # Implement your metrics calculation logic here
-        preds = torch.argmax(outputs, dim=1)
-        accuracy = (preds == labels).float().mean()
-        metrics = {'val_acc': accuracy}
-        return metrics
-    '''
-
 
 # images dataset
 
@@ -120,7 +96,7 @@ class ImagesDataset(Dataset):
 
     def __getitem__(self, index):
         image = self.images[index]
-        #label = self.labels[index]
+        label = self.labels[index]
         img = Image.fromarray(image)
         img = img.convert('RGB')
         return self.transform(img)
@@ -129,7 +105,7 @@ class ImagesDataset(Dataset):
 # main
 if __name__ == '__main__':
 
-    npz_file_path = '/home/ubuntu/.medmnist/breastmnist.npz' 
+    npz_file_path = '/home/ubuntu/.medmnist/chestmnist.npz' 
 
     ds_train = ImagesDataset(npz_file_path, IMAGE_SIZE, 'train')
     ds_validate = ImagesDataset(npz_file_path, IMAGE_SIZE, 'validate')
@@ -160,8 +136,15 @@ if __name__ == '__main__':
         sync_batchnorm = True  #should be true for distributed training(as per momentum^2 paper
     )
 
+
+    # Set float32 matrix multiplication precision
+    torch.set_float32_matmul_precision('high') 
+
+    #I may have misteknly only used the training set (80K instead of 112K)from ChestMNIST instead of all images, prob ok in case i dont want to run the 1000 epochs again
     trainer.fit(model, train_loader)
 
-    #trainer.validate(model, dataloaders=val_loader)
+    torch.save(model.state_dict(), 'byol_pretrained_chestmnist_1000_epochs.pth')   #was model.
 
+    #you dont validate pre-training silly, but lets viz with t 
+    #trainer.validate(model, dataloaders=val_loader)
     #trainer.test(model, test_loader)
