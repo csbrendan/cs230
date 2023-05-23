@@ -26,7 +26,7 @@ args = parser.parse_args()
 # constants
 
 BATCH_SIZE = 32
-EPOCHS     = 10 #was 1000
+EPOCHS     = 1000
 LR         = 3e-4
 #NUM_GPUS   = 2
 IMAGE_SIZE = 28 #was 256
