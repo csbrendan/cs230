@@ -20,7 +20,7 @@ from torchvision import models, transforms
 from torch.utils.data import Dataset, DataLoader
 
 import medmnist
-from medmnist import INFO
+from medmnist import INFO, Evaluator
 
 import os
 import argparse
@@ -61,13 +61,13 @@ class SupervisedLightningModule(pl.LightningModule):
 
         #print("inputs is ")
         #print(x)  # [[[[[ 0.0902,  0.0902,  0.0824,  ...,  0.2941,  0.2706,  0.2941],   INPUT is normalized images...
-        #print("targets is ")
-        #print(y)  # [ [1],[1],[1],[0], .... TARGET is labels 
+        print("targets is ")
+        print(y)  # [ [1],[1],[1],[0], .... TARGET is labels 
 
-        #print("inputs shape is ")
-        #print(x.shape) # [64, 3, 28, 28]     2 batches of size 32..(64)  of 28x28x3 images       
-        #print("targets shape is ")
-        #print(y.shape) # [64, 1]             2 batches of size 32 of labels 
+        print("inputs shape is ")
+        print(x.shape) # [64, 3, 28, 28]     2 batches of size 32..(64)  of 28x28x3 images       
+        print("targets shape is ")
+        print(y.shape) # [64, 1]             2 batches of size 32 of labels 
 
         '''
         y = y.unsqueeze(1)
@@ -102,7 +102,7 @@ data_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
 ])
 
-data_flag = 'breastmnist'
+data_flag = 'pneumoniamnist'
 info = INFO[data_flag]
 print("medMNIST dataset INFO: ")
 print(info)
@@ -124,6 +124,8 @@ TEST_DATASET = DataClass(split='test', transform=data_transform, download=False)
 train_loader = DataLoader(dataset=TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(dataset=VAL_DATASET, batch_size=BATCH_SIZE, shuffle=False) # was 2*BATCH_SIZE
 test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False) # was 2*BATCH_SIZE
+
+
 
 
 ################ Supervised Training without BYOL
@@ -149,7 +151,7 @@ model.load_state_dict(saved_state_dict)     #model.load_state_dict(torch.load(mo
 #    param.requires_grad = False
 
 num_features = model.fc.in_features
-print("num_features: ", num_features)
+print("num_features: ", num_features)   #512
 model.fc = nn.Linear(num_features, 1)   # output size of 1 is correct for binary classification
 
 supervised = SupervisedLightningModule(model, num_classes=1) 
@@ -175,17 +177,50 @@ def accuracy(pred: Tensor, labels: Tensor) -> float:
 #model.cuda()
 #acc = sum([accuracy(model(x.cuda()), y.cuda()) for x, y in val_loader]) / len(val_loader)
 
-model.cpu()
-acc = sum([accuracy(model(x.cpu()), y.cpu()) for x, y in val_loader]) / len(val_loader)
+#model.cpu()
+acc = sum([accuracy(model(x), y) for x, y in val_loader]) / len(val_loader)
 print(f"Accuracy: {acc:.3f}")
 
 
 
 
+   
 
 
+def test(split):
+    model.eval()  #was model.
+    y_true = torch.tensor([])
+    y_score = torch.tensor([])
+    
+    data_loader = val_loader if split == 'train' else test_loader
 
+    with torch.no_grad():
+        for inputs, targets in data_loader:
+            outputs = model(inputs)
 
+            if task == 'multi-label, binary-class':
+                targets = targets.to(torch.float32)
+                outputs = outputs.softmax(dim=-1)
+            else:  #should be for binary-class
+                targets = targets.squeeze().long()
+                outputs = outputs.softmax(dim=-1)
+                targets = targets.float().resize_(len(targets), 1)
+
+            y_true = torch.cat((y_true, targets), 0)
+            y_score = torch.cat((y_score, outputs), 0)
+
+        y_true = y_true.numpy()
+        y_score = y_score.detach().numpy()
+        
+        evaluator = Evaluator(data_flag, split)
+        metrics = evaluator.evaluate(y_score)
+    
+        print('%s  auc: %.3f  acc:%.3f' % (split, *metrics))
+
+        
+print('==> Evaluating ...')
+#test('train')
+test('test') 
 
 
 
