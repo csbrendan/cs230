@@ -56,6 +56,9 @@ class SupervisedLightningModule(pl.LightningModule):
 
         #few shot 
         support_x, support_y = next(iter(support_loader))
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        support_x = support_x.to(device)
+        support_y = support_y.to(device)
         x = torch.cat([x, support_x], dim=0)
         y = torch.cat([y, support_y], dim=0)
 
@@ -74,23 +77,24 @@ class SupervisedLightningModule(pl.LightningModule):
 
         # Calculate accuracy
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
-        accuracy = accuracy_score(y, y_pred)
+        #accuracy = accuracy_score(y, y_pred)
+        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
         # Calc AUC
         y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().numpy(), y_prob.cpu().numpy())
+        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("val_auc", auc)
 
         # Calculate precision, recall, and F1 score
-        precision = precision_score(y.cpu().numpy(), y_pred.cpu().numpy())
-        recall = recall_score(y.cpu().numpy(), y_pred.cpu().numpy())
-        f1 = f1_score(y.cpu().numpy(), y_pred.cpu().numpy())
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
 
-        self.log("test_precision", precision)
-        self.log("test_recall", recall)
-        self.log("test_f1", f1)
+        self.log("val_precision", precision)
+        self.log("val_recall", recall)
+        self.log("val_f1", f1)
 
 
         return {"loss": loss}
@@ -104,19 +108,20 @@ class SupervisedLightningModule(pl.LightningModule):
 
         # Calculate accuracy
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
-        accuracy = accuracy_score(y, y_pred)
+        #accuracy = accuracy_score(y, y_pred)
+        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
 
         # Calc AUC
         y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().numpy(), y_prob.cpu().numpy())
-        self.log("val_auc", auc)
+        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
+        self.log("test_auc", auc)
 
         # Calculate precision, recall, and F1 score
-        precision = precision_score(y.cpu().numpy(), y_pred.cpu().numpy())
-        recall = recall_score(y.cpu().numpy(), y_pred.cpu().numpy())
-        f1 = f1_score(y.cpu().numpy(), y_pred.cpu().numpy())
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
 
         self.log("test_precision", precision)
         self.log("test_recall", recall)
@@ -178,7 +183,7 @@ model = resnet18()
 model.load_state_dict(saved_state_dict)     
 
 #I can experiment here and freeze 50%, 75%, 95% of layers....
-# Do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
+# Do this if you _want to update only the reshaped layer params, otherwise you will finetune the all the layers
 #for param in model.parameters():
 #    param.requires_grad = False
 print("fine tuning all layers...")
@@ -191,7 +196,7 @@ model.fc = nn.Linear(num_features, 1)   # output size of 1 is correct for binary
 
 supervised = SupervisedLightningModule(model, num_classes=1) 
 trainer = pl.Trainer(
-    max_epochs=40, 
+    max_epochs=25, 
     logger=logger,
 )
 

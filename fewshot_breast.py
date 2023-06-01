@@ -5,7 +5,9 @@ from kornia import filters
 from kornia.geometry import transform as tf
 import torch
 from torch import nn, Tensor
+
 from typing import Union
+
 from copy import deepcopy
 from itertools import chain
 from typing import Dict, List
@@ -15,19 +17,24 @@ import torch.nn.functional as f
 
 from torchvision import models, transforms
 from torch.utils.data import Dataset, DataLoader
+
 import medmnist
 from medmnist import INFO, Evaluator
+
 import os
 import argparse
 import multiprocessing
 from pathlib import Path
 from PIL import Image
 import numpy as np
+
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 
-logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_pneumonia")
+
+logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_breast")
+
 
 class SupervisedLightningModule(pl.LightningModule):
     def __init__(self, model: nn.Module, num_classes: int, **hparams):  
@@ -46,6 +53,17 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
+
+        #few shot 
+        support_x, support_y = next(iter(support_loader))
+
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        support_x = support_x.to(device)
+        support_y = support_y.to(device)
+
+        x = torch.cat([x, support_x], dim=0)
+        y = torch.cat([y, support_y], dim=0)
+
         y = y.float()
         loss = f.binary_cross_entropy_with_logits(self.forward(x), y)   
         self.log("train_loss", loss) #for tensorboard
@@ -57,12 +75,14 @@ class SupervisedLightningModule(pl.LightningModule):
         x, y = batch
         y = y.float()
         logits = self.forward(x)
-        loss = f.binary_cross_entropy_with_logits(logits, y) 
+        loss = f.binary_cross_entropy_with_logits(logits, y)
 
         # Calculate accuracy
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
+
         #accuracy = accuracy_score(y, y_pred)
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
@@ -91,15 +111,17 @@ class SupervisedLightningModule(pl.LightningModule):
         loss = f.binary_cross_entropy_with_logits(logits, y)
 
         # Calculate accuracy
-        y_pred = (logits > 0).float()  
+        y_pred = (logits > 0).float()  # Convert logits to predicted labels
+
         #accuracy = accuracy_score(y, y_pred)
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
 
         # Calc AUC
         y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
+        auc = roc_auc_score(y.cpu().numpy(), y_prob.cpu().numpy())
         self.log("val_auc", auc)
 
         # Calculate precision, recall, and F1 score
@@ -114,12 +136,12 @@ class SupervisedLightningModule(pl.LightningModule):
         return {"loss": loss}        
 
 
-############### DATASETS - PNEUMONIA MNIST
+############### DATASETS - BREAST MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
 ######### MY CONSTS
-BATCH_SIZE = 32   #I had 32 they may need 128
+BATCH_SIZE = 32   
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
@@ -133,7 +155,7 @@ data_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
 ])
 
-data_flag = 'pneumoniamnist'
+data_flag = 'breastmnist'
 info = INFO[data_flag]
 print("medMNIST dataset INFO: ")
 print(info)
@@ -168,9 +190,9 @@ model.load_state_dict(saved_state_dict)
 
 #I can experiment here and freeze 50%, 75%, 95% of layers....
 # Do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
-for param in model.parameters():
-    param.requires_grad = False
-#print("freezing all layers except classifier...")
+#for param in model.parameters():
+#    param.requires_grad = False
+print("fine tuning all layers...")
 
 
 num_features = model.fc.in_features
@@ -184,19 +206,28 @@ trainer = pl.Trainer(
     logger=logger,
 )
 
-trainer.fit(supervised, train_loader, val_loader)
+
+########### FEW SHOT ######## 
+  
+# Support set creation
+support_samples_per_class = 5
+support_indices = []
+for class_label in range(n_classes):
+    class_indices = [i for i, (_, label) in enumerate(TRAIN_DATASET) if label == class_label]
+    selected_indices = random.sample(class_indices, support_samples_per_class)
+    support_indices.extend(selected_indices)
+
+support_dataset = torch.utils.data.Subset(TRAIN_DATASET, support_indices)
+support_loader = DataLoader(
+    dataset=support_dataset,
+    batch_size=support_samples_per_class,
+    shuffle=True,
+    drop_last=True,
+)
+
+
+##############################
+
+trainer.fit(supervised, support_loader, val_loader)
 
 trainer.test(supervised, test_loader)
-
-
-
-
-
-
-
-
-
-
-
-
-

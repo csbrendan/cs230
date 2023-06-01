@@ -27,7 +27,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 
-logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_pneumonia")
+logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_breast")
 
 class SupervisedLightningModule(pl.LightningModule):
     def __init__(self, model: nn.Module, num_classes: int, **hparams):  
@@ -61,41 +61,12 @@ class SupervisedLightningModule(pl.LightningModule):
 
         # Calculate accuracy
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
+
         #accuracy = accuracy_score(y, y_pred)
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
-
-        # Calc AUC
-        y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
-        self.log("val_auc", auc)
-
-        # Calculate precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-
-        self.log("val_precision", precision)
-        self.log("val_recall", recall)
-        self.log("val_f1", f1)
-
-
-        return {"loss": loss}
-
-    @torch.no_grad()
-    def test_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
-        x, y = batch
-        y = y.float()
-        logits = self.forward(x)
-        loss = f.binary_cross_entropy_with_logits(logits, y)
-
-        # Calculate accuracy
-        y_pred = (logits > 0).float()  
-        #accuracy = accuracy_score(y, y_pred)
-        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        self.log("test_loss", loss)
-        self.log("test_accuracy", accuracy)
 
         # Calc AUC
         y_prob = torch.sigmoid(logits)
@@ -111,10 +82,43 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("test_recall", recall)
         self.log("test_f1", f1)
 
+
+        return {"loss": loss}
+
+    @torch.no_grad()
+    def test_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
+        x, y = batch
+        y = y.float()
+        logits = self.forward(x)
+        loss = f.binary_cross_entropy_with_logits(logits, y)
+
+        # Calculate accuracy
+        y_pred = (logits > 0).float()
+
+        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())  
+        #accuracy = accuracy_score(y, y_pred)
+
+        self.log("test_loss", loss)
+        self.log("test_accuracy", accuracy)
+
+        # Calc AUC
+        y_prob = torch.sigmoid(logits)
+        auc = roc_auc_score(y.cpu().numpy(), y_prob.cpu().numpy())
+        self.log("val_auc", auc)
+
+        # Calculate precision, recall, and F1 score
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+
+        self.log("test_precision", precision)
+        self.log("test_recall", recall)
+        self.log("test_f1", f1)
+
         return {"loss": loss}        
 
 
-############### DATASETS - PNEUMONIA MNIST
+############### DATASETS - BREAST MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
@@ -133,7 +137,7 @@ data_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
 ])
 
-data_flag = 'pneumoniamnist'
+data_flag = 'breastmnist'
 info = INFO[data_flag]
 print("medMNIST dataset INFO: ")
 print(info)

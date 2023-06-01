@@ -26,14 +26,17 @@ import numpy as np
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix
 
-logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_pneumonia")
+logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_breast")
 
 class SupervisedLightningModule(pl.LightningModule):
     def __init__(self, model: nn.Module, num_classes: int, **hparams):  
         super().__init__()
         self.model = model
         self.num_classes  = num_classes     
+        self.true_labels = []
+        self.predicted_labels = []
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
@@ -76,9 +79,9 @@ class SupervisedLightningModule(pl.LightningModule):
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
 
-        self.log("val_precision", precision)
-        self.log("val_recall", recall)
-        self.log("val_f1", f1)
+        self.log("test_precision", precision)
+        self.log("test_recall", recall)
+        self.log("test_f1", f1)
 
 
         return {"loss": loss}
@@ -90,19 +93,32 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = f.binary_cross_entropy_with_logits(logits, y)
 
-        # Calculate accuracy
+        # modify the decision threshold
+        #threshold = 0.5
+        # calculate probabilities using sigmoid function
+        #probabilities = torch.sigmoid(logits)
+        # apply the threshold to obtain predictions
+        #y_pred = (probabilities > threshold).float()
+
+        #default decision 
         y_pred = (logits > 0).float()  
+        
+        # calc accuracy
         #accuracy = accuracy_score(y, y_pred)
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
 
-        # Calc AUC
+        # accumulate true labels and predicted labels for confusion matrix
+        self.true_labels.append(y.cpu().detach().numpy())
+        self.predicted_labels.append(y_pred.cpu().detach().numpy())
+
+        # calc AUC
         y_prob = torch.sigmoid(logits)
         auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("val_auc", auc)
 
-        # Calculate precision, recall, and F1 score
+        # calc precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
@@ -114,7 +130,17 @@ class SupervisedLightningModule(pl.LightningModule):
         return {"loss": loss}        
 
 
-############### DATASETS - PNEUMONIA MNIST
+
+    def on_test_end(self) -> None:
+        # compute confusion matrix using accumulated labels
+        true_labels = np.concatenate(self.true_labels)
+        predicted_labels = np.concatenate(self.predicted_labels)
+        confusion = confusion_matrix(true_labels, predicted_labels)
+        print("Confusion Matrix")
+        print(confusion)
+
+
+############### DATASETS - BREAST MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
@@ -133,7 +159,7 @@ data_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
 ])
 
-data_flag = 'pneumoniamnist'
+data_flag = 'breastmnist'
 info = INFO[data_flag]
 print("medMNIST dataset INFO: ")
 print(info)
@@ -168,9 +194,9 @@ model.load_state_dict(saved_state_dict)
 
 #I can experiment here and freeze 50%, 75%, 95% of layers....
 # Do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
-for param in model.parameters():
-    param.requires_grad = False
-#print("freezing all layers except classifier...")
+#for param in model.parameters():
+#    param.requires_grad = False
+print("fine tuning all layers...")
 
 
 num_features = model.fc.in_features
@@ -187,6 +213,7 @@ trainer = pl.Trainer(
 trainer.fit(supervised, train_loader, val_loader)
 
 trainer.test(supervised, test_loader)
+
 
 
 
