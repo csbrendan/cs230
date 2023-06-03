@@ -14,24 +14,23 @@ from typing import Dict, List
 import pytorch_lightning as pl
 from torch import optim
 import torch.nn.functional as f
-
 from torchvision import models, transforms
 from torch.utils.data import Dataset, DataLoader
-
 import medmnist
 from medmnist import INFO, Evaluator
-
 import os
 import argparse
 import multiprocessing
 from pathlib import Path
 from PIL import Image
 import numpy as np
-
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix
+
+from scipy.stats import sem
+from scipy.stats import norm
 
 logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_derma")
 
@@ -101,11 +100,33 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y)) 
         
-        # accuracy
         _, y_pred = torch.max(logits, dim=1) 
+
+        # accuracy
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
+
+        # AUC & Conf interval
+        try:
+             y_prob = torch.softmax(logits, dim=1)  # Apply softmax to obtain class probabilities
+             y_one_hot = f.one_hot(y.squeeze(), num_classes=n_classes)  
+             auc = roc_auc_score(y_one_hot.cpu().numpy(), y_prob.cpu().numpy(), multi_class='ovr') 
+             self.log("test_auc", auc)
+
+             # confidence interval using the non-parametric method by DeLong
+             n = len(y)
+             auc_var = auc * (1 - auc)
+             auc_se = np.sqrt(auc_var / n)
+             # calc lower and upper bounds of the confidence interval
+             alpha = 0.95  # desired confidence level
+             z = norm.ppf(1 - (1 - alpha) / 2)
+             lower_bound = auc - z * auc_se
+             upper_bound = auc + z * auc_se
+             self.log("Confidence Interval - lower bound: ", lower_bound)
+             self.log("Confidence Interval - upper bound: ", upper_bound)
+        except ValueError:
+            pass
 
         # accumulate true labels and predicted labels for confusion matrix
         self.true_labels.append(y.cpu().detach().numpy())
@@ -137,7 +158,7 @@ class SupervisedLightningModule(pl.LightningModule):
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
 # CONSTS
-BATCH_SIZE = 32   
+BATCH_SIZE = 64   
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
@@ -158,9 +179,9 @@ print(info)
 
 task = info['task']
 n_channels = info['n_channels']
-print("n_channels: ", n_channels)   # 1
+print("n_channels: ", n_channels)   
 n_classes = len(info['label'])
-print("n_classes: ", n_classes)     # 2
+print("n_classes: ", n_classes)     
 
 DataClass = getattr(medmnist, info['python_class'])
 TRAIN_DATASET = DataClass(split='train', transform=data_transform, download=False)

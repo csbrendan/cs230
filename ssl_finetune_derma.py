@@ -90,11 +90,9 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y))       
 
-        #default decision 
-        y_pred = (logits > 0).float()  
-        
+        _, y_pred = torch.max(logits, dim=1)         
+
         # accuracy
-        _, y_pred = torch.max(logits, dim=1) 
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
@@ -102,6 +100,27 @@ class SupervisedLightningModule(pl.LightningModule):
         # accumulate true labels and predicted labels for confusion matrix
         self.true_labels.append(y.cpu().numpy())
         self.predicted_labels.append(y_pred.cpu().numpy())
+
+        # AUC
+        try:
+             y_prob = torch.softmax(logits, dim=1)  # Apply softmax to obtain class probabilities
+             y_one_hot = f.one_hot(y.squeeze(), num_classes=n_classes)  
+             auc = roc_auc_score(y_one_hot.cpu().numpy(), y_prob.cpu().numpy(), multi_class='ovr') 
+             self.log("test_auc", auc)
+
+             # confidence interval using the non-parametric method by DeLong
+             n = len(y)
+             auc_var = auc * (1 - auc)
+             auc_se = np.sqrt(auc_var / n)
+             # calc lower and upper bounds of the confidence interval
+             alpha = 0.95  # desired confidence level
+             z = norm.ppf(1 - (1 - alpha) / 2)
+             lower_bound = auc - z * auc_se
+             upper_bound = auc + z * auc_se
+             self.log("Confidence Interval - lower bound: ", lower_bound)
+             self.log("Confidence Interval - upper bound: ", upper_bound)
+        except ValueError:
+            pass
 
         # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
@@ -130,7 +149,7 @@ class SupervisedLightningModule(pl.LightningModule):
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
 # CONSTS
-BATCH_SIZE = 32 
+BATCH_SIZE = 32
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
@@ -191,7 +210,7 @@ model.fc = nn.Linear(num_features, 7)
 
 supervised = SupervisedLightningModule(model, num_classes=7) 
 trainer = pl.Trainer(
-    max_epochs=50, 
+    max_epochs=25, 
     logger=logger,
 )
 
