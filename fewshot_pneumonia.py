@@ -31,7 +31,10 @@ import numpy as np
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix
 
+from scipy.stats import sem
+from scipy.stats import norm
 
 logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_pneumonia")
 
@@ -41,6 +44,8 @@ class SupervisedLightningModule(pl.LightningModule):
         super().__init__()
         self.model = model
         self.num_classes  = num_classes     
+        self.true_labels = []
+        self.predicted_labels = []
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
@@ -54,7 +59,7 @@ class SupervisedLightningModule(pl.LightningModule):
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
 
-        #few shot 
+        # few shot 
         support_x, support_y = next(iter(support_loader))
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         support_x = support_x.to(device)
@@ -64,7 +69,7 @@ class SupervisedLightningModule(pl.LightningModule):
 
         y = y.float()
         loss = f.binary_cross_entropy_with_logits(self.forward(x), y)   
-        self.log("train_loss", loss) #for tensorboard
+        self.log("train_loss", loss) 
         self.log("train_loss", loss.item())
         return {"loss": loss}
 
@@ -75,19 +80,19 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = f.binary_cross_entropy_with_logits(logits, y)
 
-        # Calculate accuracy
-        y_pred = (logits > 0).float()  # Convert logits to predicted labels
-        #accuracy = accuracy_score(y, y_pred)
+        y_pred = (logits > 0).float() 
+
+        # accuracy 
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
-        # Calc AUC
+        # AUC
         y_prob = torch.sigmoid(logits)
         auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("val_auc", auc)
 
-        # Calculate precision, recall, and F1 score
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
@@ -95,7 +100,6 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("val_precision", precision)
         self.log("val_recall", recall)
         self.log("val_f1", f1)
-
 
         return {"loss": loss}
 
@@ -106,19 +110,37 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = f.binary_cross_entropy_with_logits(logits, y)
 
-        # Calculate accuracy
-        y_pred = (logits > 0).float()  # Convert logits to predicted labels
-        #accuracy = accuracy_score(y, y_pred)
+        y_pred = (logits > 0).float() 
+
+        #accuracy 
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
 
-        # Calc AUC
+        # accumulate true labels and predicted labels for confusion matrix
+        self.true_labels.append(y.cpu().detach().numpy())
+        self.predicted_labels.append(y_pred.cpu().detach().numpy())
+
+        # AUC
         y_prob = torch.sigmoid(logits)
         auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("test_auc", auc)
 
-        # Calculate precision, recall, and F1 score
+        # confidence interval using the non-parametric method by DeLong
+        n = len(y)
+        auc_var = auc * (1 - auc)
+        auc_se = np.sqrt(auc_var / n)
+        # calc lower and upper bounds of the confidence interval
+        alpha = 0.95  # desired confidence level
+        z = norm.ppf(1 - (1 - alpha) / 2)
+        lower_bound = auc - z * auc_se
+        upper_bound = auc + z * auc_se
+
+        self.log("Confidence Interval - lower bound: ", lower_bound)
+        self.log("Confidence Interval - upper bound: ", upper_bound)
+
+
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
@@ -129,12 +151,20 @@ class SupervisedLightningModule(pl.LightningModule):
 
         return {"loss": loss}        
 
+    def on_test_end(self) -> None:
+        # compute confusion matrix using accumulated labels
+        true_labels = np.concatenate(self.true_labels)
+        predicted_labels = np.concatenate(self.predicted_labels)
+        confusion = confusion_matrix(true_labels, predicted_labels)
+        print("Confusion Matrix")
+        print(confusion)
+
 
 ############### DATASETS - PNEUMONIA MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
-######### MY CONSTS
+# CONSTS
 BATCH_SIZE = 32   
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
@@ -146,7 +176,7 @@ from torchvision.transforms import ToTensor
 data_transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=3),  # Convert to RGB
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  
 ])
 
 data_flag = 'pneumoniamnist'
@@ -182,8 +212,8 @@ saved_state_dict = torch.load(model_path)
 model = resnet18()
 model.load_state_dict(saved_state_dict)     
 
-#I can experiment here and freeze 50%, 75%, 95% of layers....
-# Do this if you _want to update only the reshaped layer params, otherwise you will finetune the all the layers
+# experiment here and freeze 50%, 75%, 95% of layers....
+# do this if you _want to update only the reshaped layer params, otherwise you will finetune the all the layers
 #for param in model.parameters():
 #    param.requires_grad = False
 print("fine tuning all layers...")
@@ -200,11 +230,10 @@ trainer = pl.Trainer(
     logger=logger,
 )
 
-
 ########### FEW SHOT ######## 
   
 # Support set creation
-support_samples_per_class = 5
+support_samples_per_class = 10
 support_indices = []
 for class_label in range(n_classes):
     class_indices = [i for i, (_, label) in enumerate(TRAIN_DATASET) if label == class_label]
@@ -218,26 +247,8 @@ support_loader = DataLoader(
     shuffle=True,
     drop_last=True,
 )
-
-
 ##############################
-
-
-
 
 trainer.fit(supervised, support_loader, val_loader)
 
 trainer.test(supervised, test_loader)
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -28,6 +28,9 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix
 
+from scipy.stats import sem
+from scipy.stats import norm
+
 logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_derma")
 
 class SupervisedLightningModule(pl.LightningModule):
@@ -50,10 +53,9 @@ class SupervisedLightningModule(pl.LightningModule):
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
         y = y.long()
-        #loss = f.cross_entropy(self.forward(x), y)  
         loss = torch.nn.CrossEntropyLoss()(self.forward(x), torch.squeeze(y))         
 
-        self.log("train_loss", loss) #for tensorboard
+        self.log("train_loss", loss) 
         self.log("train_loss", loss.item())
         return {"loss": loss}
 
@@ -62,16 +64,15 @@ class SupervisedLightningModule(pl.LightningModule):
         x, y = batch
         y = y.long()
         logits = self.forward(x)
-        #loss = f.cross_entropy(logits, y) 
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y)) 
 
-        # Calculate accuracy
+        # accuracy
         _, y_pred = torch.max(logits, dim=1)    # obtain predicted class labels
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
-        # Calculate precision, recall, and F1 score              
+        # precision, recall, and F1 score              
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
@@ -80,7 +81,6 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("val_recall", recall)
         self.log("val_f1", f1)
 
-
         return {"loss": loss}
 
     @torch.no_grad()
@@ -88,13 +88,12 @@ class SupervisedLightningModule(pl.LightningModule):
         x, y = batch
         y = y.long()
         logits = self.forward(x)
-        #loss = f.cross_entropy(logits, y)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y))       
 
         #default decision 
         y_pred = (logits > 0).float()  
         
-        # calc accuracy
+        # accuracy
         _, y_pred = torch.max(logits, dim=1) 
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
@@ -104,7 +103,7 @@ class SupervisedLightningModule(pl.LightningModule):
         self.true_labels.append(y.cpu().numpy())
         self.predicted_labels.append(y_pred.cpu().numpy())
 
-        # calc precision, recall, and F1 score
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
@@ -130,8 +129,8 @@ class SupervisedLightningModule(pl.LightningModule):
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
-######### MY CONSTS
-BATCH_SIZE = 32   #I had 32 they may need 128
+# CONSTS
+BATCH_SIZE = 32 
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
@@ -142,7 +141,7 @@ from torchvision.transforms import ToTensor
 data_transform = transforms.Compose([
     #transforms.Grayscale(num_output_channels=3),  # Convert to RGB  - DermaMNIST already RGB 3 channel
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
 data_flag = 'dermamnist'
@@ -152,9 +151,9 @@ print(info)
 
 task = info['task']
 n_channels = info['n_channels']
-print("n_channels: ", n_channels)   # 1 .... 3
+print("n_channels: ", n_channels)   # 3
 n_classes = len(info['label'])
-print("n_classes: ", n_classes)     # 2 .....7 
+print("n_classes: ", n_classes)     # 7
 
 DataClass = getattr(medmnist, info['python_class'])
 TRAIN_DATASET = DataClass(split='train', transform=data_transform, download=False)
@@ -178,21 +177,21 @@ saved_state_dict = torch.load(model_path)
 model = resnet18()
 model.load_state_dict(saved_state_dict)     
 
-#I can experiment here and freeze 50%, 75%, 95% of layers....
-# Do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
+# experiment here and freeze 50%, 75%, 95% of layers....
+# do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
 #for param in model.parameters():
 #    param.requires_grad = False
 print("fine tuning all layers...")
 
 
 num_features = model.fc.in_features
-print("num_features: ", num_features)   #512
-model.fc = nn.Linear(num_features, 7)   # output size of 1 is correct for binary classification
+print("num_features: ", num_features) 
+model.fc = nn.Linear(num_features, 7) 
 
 
 supervised = SupervisedLightningModule(model, num_classes=7) 
 trainer = pl.Trainer(
-    max_epochs=25, 
+    max_epochs=50, 
     logger=logger,
 )
 

@@ -36,14 +36,17 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix
 
+from scipy.stats import sem
+from scipy.stats import norm
+
 logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_pneumonia")
 
 
 class SupervisedLightningModule(pl.LightningModule):
-    def __init__(self, model: nn.Module, num_classes: int, **hparams):  #added num_classes since STL10 is 1000 classes
+    def __init__(self, model: nn.Module, num_classes: int, **hparams): 
         super().__init__()
         self.model = model
-        self.num_classes  = num_classes     #me, since not STL10
+        self.num_classes  = num_classes   
         self.true_labels = []
         self.predicted_labels = []
 
@@ -59,11 +62,9 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
-        #y = y.unsqueeze(1)
-        #y = f.one_hot(y, num_classes=self.num_classes).float()
         y = y.float()
-        loss = f.binary_cross_entropy_with_logits(self.forward(x), y)   #loss = f.cross_entropy(self.forward(x), y)
-        self.log("train_loss", loss) #for tensorboard
+        loss = f.binary_cross_entropy_with_logits(self.forward(x), y)   
+        self.log("train_loss", loss) 
         self.log("train_loss", loss.item())
         return {"loss": loss}
 
@@ -72,22 +73,21 @@ class SupervisedLightningModule(pl.LightningModule):
         x, y = batch
         y = y.float()
         logits = self.forward(x)
-        loss = f.binary_cross_entropy_with_logits(logits, y) #was cross_entropy()
+        loss = f.binary_cross_entropy_with_logits(logits, y) 
 
-        # Calculate accuracy
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
-        #accuracy = accuracy_score(y, y_pred)
+
+        # accuracy
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
-        # Calc AUC
+        # AUC
         y_prob = torch.sigmoid(logits)
         auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("val_auc", auc)
-        #self.print(f"Validation AUC: {auc:.4f}")
 
-        # Calculate precision, recall, and F1 score
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
@@ -106,16 +106,16 @@ class SupervisedLightningModule(pl.LightningModule):
         loss = f.binary_cross_entropy_with_logits(logits, y)
 
         # modify the decision threshold
-        threshold = 0.4
+        #threshold = 0.4
         # calculate probabilities using sigmoid function
-        probabilities = torch.sigmoid(logits)
+        #probabilities = torch.sigmoid(logits)
         # apply the threshold to obtain predictions
-        y_pred = (probabilities > threshold).float()
+        #y_pred = (probabilities > threshold).float()
 
-        #default decision
-        #y_pred = (logits > 0).float()  # Convert logits to predicted labels
+        # default decision
+        y_pred = (logits > 0).float()  # Convert logits to predicted labels
 
-        # Calculate accuracy
+        # accuracy
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
@@ -124,13 +124,26 @@ class SupervisedLightningModule(pl.LightningModule):
         self.true_labels.append(y.cpu().detach().numpy())
         self.predicted_labels.append(y_pred.cpu().detach().numpy())
 
-        # Calc AUC
+        # AUC
         y_prob = torch.sigmoid(logits)
         auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
         self.log("test_auc", auc)
         #self.print(f"Test AUC: {auc:.4f}")
 
-        # Calculate precision, recall, and F1 score
+        # confidence interval using the non-parametric method by DeLong
+        n = len(y)
+        auc_var = auc * (1 - auc)
+        auc_se = np.sqrt(auc_var / n)
+        # calc lower and upper bounds of the confidence interval
+        alpha = 0.95  # desired confidence level
+        z = norm.ppf(1 - (1 - alpha) / 2)
+        lower_bound = auc - z * auc_se
+        upper_bound = auc + z * auc_se
+
+        self.log("Confidence Interval - lower bound: ", lower_bound)
+        self.log("Confidence Interval - upper bound: ", upper_bound)
+
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
@@ -155,20 +168,19 @@ class SupervisedLightningModule(pl.LightningModule):
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
-######### MY CONSTS
-BATCH_SIZE = 32   #I had 32 they may need 128
+# CONSTS
+BATCH_SIZE = 32   
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
 print("NUM_WORKERS: ", NUM_WORKERS)
 
-############### DATASETS - C# load the data via my method from pneumoniamnist.py
 from torchvision.transforms import ToTensor
 
 data_transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=3),  # Convert to RGB
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  
 ])
 
 data_flag = 'pneumoniamnist'
@@ -189,8 +201,8 @@ TEST_DATASET = DataClass(split='test', transform=data_transform, download=False)
 
 # encapsulate data into dataloader form
 train_loader = DataLoader(dataset=TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True)
-val_loader = DataLoader(dataset=VAL_DATASET, batch_size=BATCH_SIZE, shuffle=False) # was 2*BATCH_SIZE
-test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False) # was 2*BATCH_SIZE
+val_loader = DataLoader(dataset=VAL_DATASET, batch_size=BATCH_SIZE, shuffle=False) 
+test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=False) 
 
 
 
@@ -198,29 +210,29 @@ test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=Fa
 ################## Supervised Training again
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
-#Load stored model
+# Load stored model
 model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
 print("Loading model: " + model_path)
 saved_state_dict = torch.load(model_path)      
 # Load the state dictionary into the model
 model = resnet18()
-model.load_state_dict(saved_state_dict)     #model.load_state_dict(torch.load(model_path, map_location=device)['net'], strict=True)
+model.load_state_dict(saved_state_dict)    
 
-#I can experiment here and freeze 50%, 75%, 95% of layers....
-# Do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
+# experiment here and freeze 50%, 75%, 95% of layers....
+# do this if you want to update only the reshaped layer params, otherwise you will finetune the all the layers
 #for param in model.parameters():
 #    param.requires_grad = False
 print("fine tuning all layers...")
 
 
 num_features = model.fc.in_features
-print("num_features: ", num_features)   #512
-model.fc = nn.Linear(num_features, 1)   # output size of 1 is correct for binary classification
+print("num_features: ", num_features)   
+model.fc = nn.Linear(num_features, 1)   
 
 
 supervised = SupervisedLightningModule(model, num_classes=1) 
 trainer = pl.Trainer(
-    max_epochs=25,
+    max_epochs=50,
     logger=logger,
 )
 train_loader = DataLoader(

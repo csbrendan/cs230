@@ -52,7 +52,7 @@ class SupervisedLightningModule(pl.LightningModule):
         y = y.long()
         loss = torch.nn.CrossEntropyLoss()(self.forward(x), torch.squeeze(y))         
 
-        self.log("train_loss", loss) #for tensorboard
+        self.log("train_loss", loss) 
         self.log("train_loss", loss.item())
         return {"loss": loss}
 
@@ -63,13 +63,13 @@ class SupervisedLightningModule(pl.LightningModule):
         logits = self.forward(x)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y)) 
 
-        # Calculate accuracy
-        _, y_pred = torch.max(logits, dim=1)    # obtain predicted class labels
+        # accuracy
+        _, y_pred = torch.max(logits, dim=1)   
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
-        # Calculate precision, recall, and F1 score              
+        # precision, recall, and F1 score              
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
@@ -77,7 +77,6 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("val_precision", precision)
         self.log("val_recall", recall)
         self.log("val_f1", f1)
-
 
         return {"loss": loss}
 
@@ -91,7 +90,7 @@ class SupervisedLightningModule(pl.LightningModule):
         #default decision 
         y_pred = (logits > 0).float()  
         
-        # calc accuracy
+        # accuracy
         _, y_pred = torch.max(logits, dim=1) 
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("test_loss", loss)
@@ -101,7 +100,7 @@ class SupervisedLightningModule(pl.LightningModule):
         self.true_labels.append(y.cpu().numpy())
         self.predicted_labels.append(y_pred.cpu().numpy())
 
-        # calc precision, recall, and F1 score
+        # precision, recall, and F1 score
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
@@ -111,7 +110,6 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("test_f1", f1)
 
         return {"loss": loss}        
-
 
 
     def on_test_end(self) -> None:
@@ -127,7 +125,7 @@ class SupervisedLightningModule(pl.LightningModule):
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
-######### MY CONSTS
+# CONSTS
 BATCH_SIZE = 32   #I had 32 they may need 128
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
@@ -139,7 +137,7 @@ from torchvision.transforms import ToTensor
 data_transform = transforms.Compose([
     #transforms.Grayscale(num_output_channels=3),  # Convert to RGB  - DermaMNIST already RGB 3 channel
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize for RGB
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) 
 ])
 
 data_flag = 'dermamnist'
@@ -149,9 +147,9 @@ print(info)
 
 task = info['task']
 n_channels = info['n_channels']
-print("n_channels: ", n_channels)   # 1 .... 3
+print("n_channels: ", n_channels)   # 3
 n_classes = len(info['label'])
-print("n_classes: ", n_classes)     # 2 .....7 
+print("n_classes: ", n_classes)     # 7
 
 DataClass = getattr(medmnist, info['python_class'])
 TRAIN_DATASET = DataClass(split='train', transform=data_transform, download=False)
@@ -183,8 +181,8 @@ print("freezing all layers except classifier for linear prob...")
 
 
 num_features = model.fc.in_features
-print("num_features: ", num_features)   #512
-model.fc = nn.Linear(num_features, 7)   # output size of 1 is correct for binary classification
+print("num_features: ", num_features)  
+model.fc = nn.Linear(num_features, 7)   
 
 
 supervised = SupervisedLightningModule(model, num_classes=7) 
