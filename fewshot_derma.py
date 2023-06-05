@@ -84,8 +84,8 @@ class SupervisedLightningModule(pl.LightningModule):
         self.log("val_accuracy", accuracy)
 
         # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
         self.log("val_precision", precision)
         self.log("val_recall", recall)
@@ -133,8 +133,8 @@ class SupervisedLightningModule(pl.LightningModule):
         self.predicted_labels.append(y_pred.cpu().detach().numpy())        
 
         # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
         f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
 
         self.log("test_precision", precision)
@@ -225,7 +225,7 @@ trainer = pl.Trainer(
 ########### FEW SHOT ######## 
   
 # Support set creation
-support_samples_per_class = 10
+support_samples_per_class = 50
 support_indices = []
 for class_label in range(n_classes):
     class_indices = [i for i, (_, label) in enumerate(TRAIN_DATASET) if label == class_label]
