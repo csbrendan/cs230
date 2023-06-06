@@ -31,7 +31,7 @@ from sklearn.metrics import confusion_matrix
 from scipy.stats import sem
 from scipy.stats import norm
 
-logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_breast")
+logger = TensorBoardLogger("logs/", name="tb_logger_sl_ft_derma")
 
 class SupervisedLightningModule(pl.LightningModule):
     def __init__(self, model: nn.Module, num_classes: int, **hparams):  
@@ -46,14 +46,15 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.hparams.get("optimizer", "Adam"))
-        lr = self.hparams.get("lr", 0.001) #.01 lr since breast dataset is small at 780 
+        lr = self.hparams.get("lr", 1e-4)
         weight_decay = self.hparams.get("weight_decay", 1e-6)
         return optimizer(self.parameters(), lr=lr, weight_decay=weight_decay)
 
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
-        y = y.float()
-        loss = f.binary_cross_entropy_with_logits(self.forward(x), y)   
+        y = y.long()
+        loss = torch.nn.CrossEntropyLoss()(self.forward(x), torch.squeeze(y))         
+
         self.log("train_loss", loss) 
         self.log("train_loss", loss.item())
         return {"loss": loss}
@@ -61,26 +62,20 @@ class SupervisedLightningModule(pl.LightningModule):
     @torch.no_grad()
     def validation_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]: 
         x, y = batch
-        y = y.float()
+        y = y.long()
         logits = self.forward(x)
-        loss = f.binary_cross_entropy_with_logits(logits, y) 
+        loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y)) 
 
-        y_pred = (logits > 0).float()  # Convert logits to predicted labels
-
-        # accuracy 
+        # accuracy
+        _, y_pred = torch.max(logits, dim=1)    # obtain predicted class labels
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
         self.log("val_loss", loss)
         self.log("val_accuracy", accuracy)
 
-        # AUC
-        y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
-        self.log("val_auc", auc)
-
-        # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        # precision, recall, and F1 score              
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)        
 
         self.log("val_precision", precision)
         self.log("val_recall", recall)
@@ -91,19 +86,50 @@ class SupervisedLightningModule(pl.LightningModule):
     @torch.no_grad()
     def test_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
         x, y = batch
-        y = y.float()
+        y = y.long()
         logits = self.forward(x)
-        loss = f.binary_cross_entropy_with_logits(logits, y)
+        loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y))       
         self.log("test_loss", loss)
 
-        #default decision 
-        y_pred = (logits > 0).float()  
+        _, y_pred = torch.max(logits, dim=1)         
+
         
+        # accuracy
+        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        self.log("test_accuracy", accuracy)
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')  
+        self.log("test_f1", f1)
+
         # accumulate true labels and predicted labels for confusion matrix
-        self.true_labels.append(y.cpu().detach().numpy())
-        self.predicted_labels.append(y_pred.cpu().detach().numpy())
+        self.true_labels.append(y.cpu().numpy())
+        self.predicted_labels.append(y_pred.cpu().numpy())
+
+        # AUC
+        try:
+             auc = None
+             y_prob = torch.softmax(logits, dim=1)  # Apply softmax to obtain class probabilities
+             y_one_hot = f.one_hot(y.squeeze(), num_classes=n_classes)  
+             auc = roc_auc_score(y_one_hot.cpu().numpy(), y_prob.cpu().numpy(), multi_class='ovr') 
+             self.log("test_auc", auc)
+             print("auc: ", auc)
+
+             # confidence interval using the non-parametric method by DeLong
+             n = len(y)
+             auc_var = auc * (1 - auc)
+             auc_se = np.sqrt(auc_var / n)
+             # calc lower and upper bounds of the confidence interval
+             alpha = 0.95  # desired confidence level
+             z = norm.ppf(1 - (1 - alpha) / 2)
+             lower_bound = auc - z * auc_se
+             upper_bound = auc + z * auc_se
+             self.log("Confidence Interval - lower bound: ", lower_bound)
+             self.log("Confidence Interval - upper bound: ", upper_bound)
+        except ValueError:
+            pass
+
 
         return {"loss": loss}        
+
 
 
     def on_test_end(self) -> None:
@@ -117,43 +143,24 @@ class SupervisedLightningModule(pl.LightningModule):
         # accuracy
         accuracy = accuracy_score(true_labels, predicted_labels)
 
-        # AUC
-        auc = roc_auc_score(true_labels, predicted_labels, average='macro')
-        
-        # confidence interval using the non-parametric method by DeLong
-        n = len(true_labels)
-        auc_var = auc * (1 - auc)
-        auc_se = np.sqrt(auc_var / n)
-        # calc lower and upper bounds of the confidence interval
-        alpha = 0.95  # desired confidence level
-        z = norm.ppf(1 - (1 - alpha) / 2)
-        lower_bound = auc - z * auc_se
-        upper_bound = auc + z * auc_se
-
         # precision, recall, and F1 score
-        precision = precision_score(true_labels, predicted_labels, average='macro')
-        recall = recall_score(true_labels, predicted_labels, average='macro')
-        f1 = f1_score(true_labels, predicted_labels, average='macro')
+        precision = precision_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        recall = recall_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=1)
 
         print("accuracy: ", accuracy)
         print("precision: ", precision)
         print("recall: ", recall)
         print("f1: ", f1)
-        print("auc: ", auc)
-
-        print("CI - lower bound: ", lower_bound)
-        print("CI - upper bound: ", upper_bound)
 
 
 
-
-
-############### DATASETS - BREAST MNIST
+############### DATASETS - DERMA MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
 
-#CONSTS
-BATCH_SIZE = 32   
+# CONSTS
+BATCH_SIZE = 32
 IMAGE_SIZE = 28 
 IMAGE_EXTS = ['.jpg', '.png', '.jpeg']
 NUM_WORKERS = multiprocessing.cpu_count()
@@ -162,21 +169,21 @@ print("NUM_WORKERS: ", NUM_WORKERS)
 from torchvision.transforms import ToTensor
 
 data_transform = transforms.Compose([
-    transforms.Grayscale(num_output_channels=3),  # Convert to RGB
+    #transforms.Grayscale(num_output_channels=3),  # Convert to RGB  - DermaMNIST already RGB 3 channel
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
 ])
 
-data_flag = 'breastmnist'
+data_flag = 'dermamnist'
 info = INFO[data_flag]
 print("medMNIST dataset INFO: ")
 print(info)
 
 task = info['task']
 n_channels = info['n_channels']
-print("n_channels: ", n_channels)   # 1
+print("n_channels: ", n_channels)   # 3
 n_classes = len(info['label'])
-print("n_classes: ", n_classes)     # 2
+print("n_classes: ", n_classes)     # 7
 
 DataClass = getattr(medmnist, info['python_class'])
 TRAIN_DATASET = DataClass(split='train', transform=data_transform, download=False)
@@ -193,7 +200,9 @@ test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=Fa
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
 #Load stored model
-model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+#model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_new_augment_batchsize_256_1000_epochs.pth'
+
 print("Loading model: " + model_path)
 saved_state_dict = torch.load(model_path)      
 # Load the state dictionary into the model
@@ -206,30 +215,18 @@ model.load_state_dict(saved_state_dict)
 #    param.requires_grad = False
 print("fine tuning all layers...")
 
-num_features = model.fc.in_features
-print("num_features: ", num_features)
-model.fc = nn.Linear(num_features, 1)
 
-supervised = SupervisedLightningModule(model, num_classes=1)
+num_features = model.fc.in_features
+print("num_features: ", num_features) 
+model.fc = nn.Linear(num_features, 7) 
+
+
+supervised = SupervisedLightningModule(model, num_classes=7) 
 trainer = pl.Trainer(
-    max_epochs=25,
+    max_epochs=25, 
     logger=logger,
 )
 
 trainer.fit(supervised, train_loader, val_loader)
 
 trainer.test(supervised, test_loader)
-
-
-
-
-
-
-
-
-
-
-
-
-
-

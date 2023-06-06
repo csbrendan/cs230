@@ -46,7 +46,7 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.hparams.get("optimizer", "Adam"))
-        lr = self.hparams.get("lr", 0.001) #.01 lr since breast dataset is small at 780 
+        lr = self.hparams.get("lr", 0.001)
         weight_decay = self.hparams.get("weight_decay", 1e-6)
         return optimizer(self.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -146,8 +146,6 @@ class SupervisedLightningModule(pl.LightningModule):
 
 
 
-
-
 ############### DATASETS - BREAST MNIST
 
 print(f"MedMNIST v{medmnist.__version__} @ {medmnist.HOMEPAGE}")
@@ -193,7 +191,8 @@ test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=Fa
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
 #Load stored model
-model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+#model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_new_augment_batchsize_256_1000_epochs.pth'
 print("Loading model: " + model_path)
 saved_state_dict = torch.load(model_path)      
 # Load the state dictionary into the model

@@ -46,7 +46,7 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.hparams.get("optimizer", "Adam"))
-        lr = self.hparams.get("lr", 1e-4)
+        lr = self.hparams.get("lr", 0.001)
         weight_decay = self.hparams.get("weight_decay", 1e-6)
         return optimizer(self.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -75,7 +75,7 @@ class SupervisedLightningModule(pl.LightningModule):
         # precision, recall, and F1 score              
         precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
         recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)        
 
         self.log("val_precision", precision)
         self.log("val_recall", recall)
@@ -89,13 +89,16 @@ class SupervisedLightningModule(pl.LightningModule):
         y = y.long()
         logits = self.forward(x)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y))       
+        self.log("test_loss", loss)
 
-        _, y_pred = torch.max(logits, dim=1)         
-
+        #default
+        _, y_pred = torch.max(logits, dim=1)       
+        
         # accuracy
         accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        self.log("test_loss", loss)
         self.log("test_accuracy", accuracy)
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')  
+        self.log("test_f1", f1)
 
         # accumulate true labels and predicted labels for confusion matrix
         self.true_labels.append(y.cpu().numpy())
@@ -103,10 +106,12 @@ class SupervisedLightningModule(pl.LightningModule):
 
         # AUC
         try:
+             auc = None
              y_prob = torch.softmax(logits, dim=1)  # Apply softmax to obtain class probabilities
              y_one_hot = f.one_hot(y.squeeze(), num_classes=n_classes)  
              auc = roc_auc_score(y_one_hot.cpu().numpy(), y_prob.cpu().numpy(), multi_class='ovr') 
              self.log("test_auc", auc)
+             print("auc: ", auc)
 
              # confidence interval using the non-parametric method by DeLong
              n = len(y)
@@ -122,14 +127,6 @@ class SupervisedLightningModule(pl.LightningModule):
         except ValueError:
             pass
 
-        # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')        
-
-        self.log("test_precision", precision)
-        self.log("test_recall", recall)
-        self.log("test_f1", f1)
 
         return {"loss": loss}        
 
@@ -137,11 +134,25 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def on_test_end(self) -> None:
         # compute confusion matrix using accumulated labels
-        true_labels = np.concatenate(self.true_labels)
-        predicted_labels = np.concatenate(self.predicted_labels)
+        true_labels = np.concatenate(self.true_labels) #
+        predicted_labels = np.concatenate(self.predicted_labels) #y_pred
         confusion = confusion_matrix(true_labels, predicted_labels)
         print("Confusion Matrix")
         print(confusion)
+
+        # accuracy
+        accuracy = accuracy_score(true_labels, predicted_labels)
+
+        # precision, recall, and F1 score
+        precision = precision_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        recall = recall_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=1)
+
+        print("accuracy: ", accuracy)
+        print("precision: ", precision)
+        print("recall: ", recall)
+        print("f1: ", f1)
+
 
 
 ############### DATASETS - DERMA MNIST

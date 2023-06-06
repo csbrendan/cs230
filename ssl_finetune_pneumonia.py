@@ -50,14 +50,13 @@ class SupervisedLightningModule(pl.LightningModule):
         self.true_labels = []
         self.predicted_labels = []
 
-
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.hparams.get("optimizer", "Adam"))
-        lr = self.hparams.get("lr", 1e-4)
-        weight_decay = self.hparams.get("weight_decay", 1e-6)
+        lr = self.hparams.get("lr", 0.001)    #1e-4 0.0001
+        weight_decay = self.hparams.get("weight_decay", 1e-6) #L2 regularization 1e-6   (log scale 1e-6 -> 1e-3)
         return optimizer(self.parameters(), lr=lr, weight_decay=weight_decay)
 
     def training_step(self, batch, *_) -> Dict[str, Union[Tensor, Dict]]:
@@ -84,13 +83,13 @@ class SupervisedLightningModule(pl.LightningModule):
 
         # AUC
         y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
+        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy(), average='macro')
         self.log("val_auc", auc)
 
         # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
+        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
+        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
 
         self.log("val_precision", precision)
         self.log("val_recall", recall)
@@ -104,34 +103,34 @@ class SupervisedLightningModule(pl.LightningModule):
         y = y.float()
         logits = self.forward(x)
         loss = f.binary_cross_entropy_with_logits(logits, y)
-
-        # modify the decision threshold
-        #threshold = 0.4
-        # calculate probabilities using sigmoid function
-        #probabilities = torch.sigmoid(logits)
-        # apply the threshold to obtain predictions
-        #y_pred = (probabilities > threshold).float()
+        self.log("test_loss", loss)
 
         # default decision
         y_pred = (logits > 0).float()  # Convert logits to predicted labels
-
-        # accuracy
-        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        self.log("test_loss", loss)
-        self.log("test_accuracy", accuracy)
 
         # accumulate true labels and predicted labels for confusion matrix
         self.true_labels.append(y.cpu().detach().numpy())
         self.predicted_labels.append(y_pred.cpu().detach().numpy())
 
-        # AUC
-        y_prob = torch.sigmoid(logits)
-        auc = roc_auc_score(y.cpu().detach().numpy(), y_prob.cpu().detach().numpy())
-        self.log("test_auc", auc)
-        #self.print(f"Test AUC: {auc:.4f}")
+        return {"loss": loss}
 
+
+    def on_test_end(self) -> None:
+        # compute confusion matrix using accumulated labels
+        true_labels = np.concatenate(self.true_labels) #y
+        predicted_labels = np.concatenate(self.predicted_labels) #y_pred
+        confusion = confusion_matrix(true_labels, predicted_labels)
+        print("Confusion Matrix")
+        print(confusion)
+
+        # accuracy
+        accuracy = accuracy_score(true_labels, predicted_labels)
+
+        # AUC
+        auc = roc_auc_score(true_labels, predicted_labels, average='macro')
+        
         # confidence interval using the non-parametric method by DeLong
-        n = len(y)
+        n = len(true_labels)
         auc_var = auc * (1 - auc)
         auc_se = np.sqrt(auc_var / n)
         # calc lower and upper bounds of the confidence interval
@@ -140,28 +139,19 @@ class SupervisedLightningModule(pl.LightningModule):
         lower_bound = auc - z * auc_se
         upper_bound = auc + z * auc_se
 
-        self.log("Confidence Interval - lower bound: ", lower_bound)
-        self.log("Confidence Interval - upper bound: ", upper_bound)
-
         # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
+        precision = precision_score(true_labels, predicted_labels, average='macro')
+        recall = recall_score(true_labels, predicted_labels, average='macro')
+        f1 = f1_score(true_labels, predicted_labels, average='macro')
 
-        self.log("test_precision", precision)
-        self.log("test_recall", recall)
-        self.log("test_f1", f1)
+        print("accuracy: ", accuracy)
+        print("precision: ", precision)
+        print("recall: ", recall)
+        print("f1: ", f1)
+        print("auc: ", auc)
 
-        return {"loss": loss}
-
-
-    def on_test_end(self) -> None:
-        # compute confusion matrix using accumulated labels
-        true_labels = np.concatenate(self.true_labels)
-        predicted_labels = np.concatenate(self.predicted_labels)
-        confusion = confusion_matrix(true_labels, predicted_labels)
-        print("Confusion Matrix")
-        print(confusion)
+        print("CI - lower bound: ", lower_bound)
+        print("CI - upper bound: ", upper_bound)
 
 
 ############### DATASETS - PNEUMONIA MNIST
@@ -232,7 +222,7 @@ model.fc = nn.Linear(num_features, 1)
 
 supervised = SupervisedLightningModule(model, num_classes=1) 
 trainer = pl.Trainer(
-    max_epochs=50,
+    max_epochs=25,
     logger=logger,
 )
 train_loader = DataLoader(
