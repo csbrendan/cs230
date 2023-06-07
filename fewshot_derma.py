@@ -48,7 +48,7 @@ class SupervisedLightningModule(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = getattr(optim, self.hparams.get("optimizer", "Adam"))
-        lr = self.hparams.get("lr", 1e-4)
+        lr = self.hparams.get("lr", 0.001)
         weight_decay = self.hparams.get("weight_decay", 1e-6)
         return optimizer(self.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -99,13 +99,10 @@ class SupervisedLightningModule(pl.LightningModule):
         y = y.long()
         logits = self.forward(x)
         loss = torch.nn.CrossEntropyLoss()(logits, torch.squeeze(y)) 
-        
+        self.log("test_loss", loss)
+
         _, y_pred = torch.max(logits, dim=1) 
 
-        # accuracy
-        accuracy = accuracy_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy())
-        self.log("test_loss", loss)
-        self.log("test_accuracy", accuracy)
 
         # AUC & Conf interval
         try:
@@ -132,15 +129,6 @@ class SupervisedLightningModule(pl.LightningModule):
         self.true_labels.append(y.cpu().detach().numpy())
         self.predicted_labels.append(y_pred.cpu().detach().numpy())        
 
-        # precision, recall, and F1 score
-        precision = precision_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
-        recall = recall_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro', zero_division=1)
-        f1 = f1_score(y.cpu().detach().numpy(), y_pred.cpu().detach().numpy(), average='macro')
-
-        self.log("test_precision", precision)
-        self.log("test_recall", recall)
-        self.log("test_f1", f1)
-
         return {"loss": loss}     
 
 
@@ -151,6 +139,19 @@ class SupervisedLightningModule(pl.LightningModule):
         confusion = confusion_matrix(true_labels, predicted_labels)
         print("Confusion Matrix")
         print(confusion)       
+
+        # accuracy
+        accuracy = accuracy_score(true_labels, predicted_labels)
+
+        # precision, recall, and F1 score
+        precision = precision_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        recall = recall_score(true_labels, predicted_labels, average='macro', zero_division=1)
+        f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=1)
+
+        print("accuracy: ", accuracy)
+        print("precision: ", precision)
+        print("recall: ", recall)
+        print("f1: ", f1)
 
 
 ############### DATASETS - DERMA MNIST
@@ -198,7 +199,9 @@ test_loader = DataLoader(dataset=TEST_DATASET, batch_size=BATCH_SIZE, shuffle=Fa
 from torch.utils.data import DataLoader
 from torchvision.models import resnet18
 #Load stored model
-model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+#model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_batchsize_256_1000_epochs.pth'
+model_path = '/home/ubuntu/remote-work/byol2/byol2_pretrained_chestmnist_new_augment_batchsize_256_1000_epochs.pth'
+
 print("Loading model: " + model_path)
 saved_state_dict = torch.load(model_path)      
 # Load the state dictionary into the model
@@ -217,7 +220,7 @@ model.fc = nn.Linear(num_features, 7)
 
 supervised = SupervisedLightningModule(model, num_classes=7) 
 trainer = pl.Trainer(
-    max_epochs=25, 
+    max_epochs=100, 
     logger=logger,
 )
 
@@ -225,7 +228,7 @@ trainer = pl.Trainer(
 ########### FEW SHOT ######## 
   
 # Support set creation
-support_samples_per_class = 50
+support_samples_per_class = 20
 support_indices = []
 for class_label in range(n_classes):
     class_indices = [i for i, (_, label) in enumerate(TRAIN_DATASET) if label == class_label]
