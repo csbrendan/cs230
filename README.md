@@ -3,6 +3,10 @@
 ## Paper
 https://github.com/csbrendan/cs230/blob/main/cs230.pdf
 
+
+
+
+
 This project utilizes the MedMNIST dataset and implements a self-supervised learning approach using BYOL-PyTorch and PyTorch-Lightning.
 
 ## Requirements
