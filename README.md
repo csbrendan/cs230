@@ -4,6 +4,9 @@
 https://github.com/csbrendan/cs230/blob/main/cs230.pdf
 
 
+## Presentation
+https://www.youtube.com/watch?v=bJBBXiw_L-A
+
 
 
 
